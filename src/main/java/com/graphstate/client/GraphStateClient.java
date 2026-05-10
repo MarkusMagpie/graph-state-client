@@ -55,6 +55,7 @@ public class GraphStateClient {
 
 
     // метод для отправки сериализованного http запроса, получения http ответа и его десериализации
+    // https://habr.com/ru/companies/otus/articles/687004/
     public Map<String, Object> post(String url, Map<String, Object> data) throws IOException {
         CloseableHttpClient client = HttpClients.createDefault();
         String json = mapper.writeValueAsString(data); // POJO -> JSON сериализация
