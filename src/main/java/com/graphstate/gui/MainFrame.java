@@ -5,6 +5,11 @@ import com.graphstate.client.GraphStateClient;
 import javax.swing.*;
 import javax.swing.table.DefaultTableModel;
 import java.awt.*;
+import java.io.BufferedReader;
+import java.io.BufferedWriter;
+import java.io.FileReader;
+import java.io.FileWriter;
+import java.util.ArrayList;
 import java.util.Map;
 import java.util.List;
 
@@ -26,6 +31,7 @@ public class MainFrame extends JFrame {
     public void initUI() {
         // главная панель с вкладками
         JTabbedPane tabbedPane = new JTabbedPane();
+        tabbedPane.setTabLayoutPolicy(JTabbedPane.SCROLL_TAB_LAYOUT);
         tabbedPane.addTab("Построение состояния по графу", buildGraphPanel());
         tabbedPane.addTab("Проверка состояния на графовость", buildCheckGraphPanel());
         tabbedPane.addTab("Проверка состояния на стабилизаторность", new JLabel("в разработке", SwingConstants.CENTER));
@@ -124,19 +130,35 @@ public class MainFrame extends JFrame {
         }
     }
 
-    private JPanel buildCheckGraphPanel() {
+    public JPanel buildCheckGraphPanel() {
         JPanel panel = new JPanel(new BorderLayout(10, 10));
         panel.setBorder(BorderFactory.createEmptyBorder(10, 10, 10, 10));
 
         // панель управления
-        JPanel controlPanel = new JPanel(new FlowLayout(FlowLayout.LEFT));
-        controlPanel.add(new JLabel("количество кубитов (n): "));
+        JPanel controlPanel = new JPanel();
+        controlPanel.setLayout(new BoxLayout(controlPanel, BoxLayout.Y_AXIS));
+
         JSpinner nSpinner = new JSpinner(new SpinnerNumberModel(3, 1, 7, 1));
-        controlPanel.add(nSpinner);
         JButton genTableBtn = new JButton("Сгенерировать таблицу");
-        controlPanel.add(genTableBtn);
         JButton checkBtn = new JButton("Проверить графовость");
-        controlPanel.add(checkBtn);
+        JButton loadCsvBtn = new JButton("Загрузить CSV");
+//        loadCsvBtn.setBackground(Color.lightGray);
+        JButton exportCsvBtn = new JButton("Экспортировать CSV");
+//        exportCsvBtn.setBackground(Color.lightGray);
+
+        JPanel row1 = new JPanel(new FlowLayout(FlowLayout.LEFT));
+        row1.add(new JLabel("количество кубитов (n): "));
+        row1.add(nSpinner);
+        row1.add(genTableBtn);
+        row1.add(checkBtn);
+
+        JPanel row2 = new JPanel(new FlowLayout(FlowLayout.LEFT));
+        row2.add(loadCsvBtn);
+        row2.add(exportCsvBtn);
+
+        controlPanel.add(row1);
+        controlPanel.add(row2);
+
         panel.add(controlPanel, BorderLayout.NORTH);
 
         // таблица знаков
@@ -215,6 +237,91 @@ public class MainFrame extends JFrame {
             }
         });
 
+        loadCsvBtn.addActionListener(ev ->
+                loadSignsFromCSV(signTable, signTableModel, nSpinner));
+
+        exportCsvBtn.addActionListener(ev ->
+                exportSignsToCSV(signTable, signTableModel, (Integer) nSpinner.getValue()));
+
         return panel;
+    }
+
+    public String formatBasis(int i, int n) {
+        String binary = Integer.toBinaryString(i);
+        String padded = String.format("%" + n + "s", binary).replace(' ', '0');
+        return "|" + padded + ">";
+    }
+
+    private void generateTableForN(int n, DefaultTableModel signTableModel) {
+        int rows = 1 << n;
+        signTableModel.setRowCount(0);
+        for (int i = 0; i < rows; i++) {
+            String basis = formatBasis(i, n);
+            signTableModel.addRow(new Object[]{basis, "+"});
+        }
+    }
+
+    public void loadSignsFromCSV(JTable signTable, DefaultTableModel signTableModel, JSpinner nSpinner) {
+        JFileChooser fileChooser = new JFileChooser();
+        if (fileChooser.showOpenDialog(signTable.getParent()) == JFileChooser.APPROVE_OPTION) {
+            try (BufferedReader br = new BufferedReader(new FileReader(fileChooser.getSelectedFile()))) {
+                String line;
+                boolean firstLine = true;
+                List<String> signs = new ArrayList<>();
+                while ((line = br.readLine()) != null) {
+                    if (firstLine) {
+                        firstLine = false;
+                        continue;
+                    } // пропуск заголовка
+
+                    if (line.trim().isEmpty()) continue;
+
+                    String[] parts = line.split(",");
+                    if (parts.length < 2) continue;
+                    String ampStr = parts[1].trim();
+                    char sign = ampStr.startsWith("-") ? '-' : '+';
+                    signs.add(String.valueOf(sign));
+                }
+
+                // число кубитов n по количеству знаков
+                int numRows = signs.size();
+                int newN = (int) Math.round(Math.log(numRows) / Math.log(2));
+                if ((1 << newN) != numRows) {
+                    JOptionPane.showMessageDialog(signTable.getParent(),
+                            "Некорректное количество знаков: " + numRows + " (должно быть степенью 2)");
+                    return;
+                }
+
+                nSpinner.setValue(newN);
+
+                generateTableForN(newN, signTableModel);
+
+                for (int i = 0; i < signs.size(); i++) {
+                    signTableModel.setValueAt(signs.get(i), i, 1);
+                }
+                JOptionPane.showMessageDialog(signTable.getParent(), "CSV загружен успешно, n = " + newN);
+            } catch (Exception ex) {
+                JOptionPane.showMessageDialog(signTable.getParent(), "Ошибка: " + ex.getMessage());
+            }
+        }
+    }
+
+    public void exportSignsToCSV(JTable signTable, DefaultTableModel signTableModel, int n) {
+        JFileChooser fileChooser = new JFileChooser();
+        if (fileChooser.showSaveDialog(signTable.getParent()) == JFileChooser.APPROVE_OPTION) {
+            try (BufferedWriter bw = new BufferedWriter(new FileWriter(fileChooser.getSelectedFile()))) {
+                bw.write("базис,амплитуда\n");
+                double norm = 1.0 / Math.sqrt(1 << n);
+                for (int i = 0; i < signTableModel.getRowCount(); i++) {
+                    String basis = (String) signTableModel.getValueAt(i, 0);
+                    String sign = (String) signTableModel.getValueAt(i, 1);
+                    double amp = sign.equals("+") ? norm : -norm;
+                    bw.write(basis + ",(" + amp + "+0j)\n");
+                }
+                JOptionPane.showMessageDialog(signTable.getParent(), "CSV файл экспортирован успешно");
+            } catch (Exception ex) {
+                JOptionPane.showMessageDialog(signTable.getParent(), "Ошибка: " + ex.getMessage());
+            }
+        }
     }
 }
