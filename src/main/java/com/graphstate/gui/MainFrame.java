@@ -10,6 +10,7 @@ import java.io.BufferedWriter;
 import java.io.FileReader;
 import java.io.FileWriter;
 import java.util.ArrayList;
+import java.util.Base64;
 import java.util.Map;
 import java.util.List;
 
@@ -34,8 +35,8 @@ public class MainFrame extends JFrame {
         tabbedPane.setTabLayoutPolicy(JTabbedPane.SCROLL_TAB_LAYOUT);
         tabbedPane.addTab("Построение состояния по графу", buildGraphPanel());
         tabbedPane.addTab("Проверка состояния на графовость", buildCheckGraphPanel());
-        tabbedPane.addTab("Проверка состояния на стабилизаторность", new JLabel("в разработке", SwingConstants.CENTER));
-        tabbedPane.addTab("Анализ запутанности", new JLabel("в разработке", SwingConstants.CENTER));
+        tabbedPane.addTab("Проверка состояния на стабилизаторность", buildCheckStabilizerPanel());
+        tabbedPane.addTab("Анализ запутанности", buildEntanglementPanel());
 
         add(tabbedPane);
     }
@@ -162,7 +163,7 @@ public class MainFrame extends JFrame {
         panel.add(controlPanel, BorderLayout.NORTH);
 
         // таблица знаков
-        DefaultTableModel signTableModel = new DefaultTableModel(new String[]{"Базис", "Знак"}, 0);
+        DefaultTableModel signTableModel = new DefaultTableModel(new String[]{"Базисное состояния", "Знак"}, 0);
         JTable signTable = new JTable(signTableModel);
         signTable.setRowHeight(25);
 
@@ -189,14 +190,8 @@ public class MainFrame extends JFrame {
         // действие при генерации таблицы
         genTableBtn.addActionListener(e -> {
             int n = (Integer) nSpinner.getValue();
-            int rows = 1 << n;
-            signTableModel.setRowCount(0);
-            for (int i = 0; i < rows; i++) {
-                String binary = Integer.toBinaryString(i);
-                String padded = String.format("%" + n + "s", binary).replace(' ', '0');
-                String basisStr = "|" + padded + ">";
-                signTableModel.addRow(new Object[]{basisStr, "+"});
-            }
+            tableGeneration(signTableModel, n);
+
             resultArea.setText("");
             graphPanel.setGraph(0, null);
         });
@@ -323,5 +318,275 @@ public class MainFrame extends JFrame {
                 JOptionPane.showMessageDialog(signTable.getParent(), "Ошибка: " + ex.getMessage());
             }
         }
+    }
+
+
+
+    public JPanel buildCheckStabilizerPanel() {
+        JPanel panel = new JPanel(new BorderLayout(10, 10));
+        panel.setBorder(BorderFactory.createEmptyBorder(10, 10, 10, 10));
+
+        // панель для управллвения
+        JPanel controlPanel = new JPanel();
+        controlPanel.setLayout(new BoxLayout(controlPanel, BoxLayout.Y_AXIS));
+        JPanel row1 = new JPanel(new FlowLayout(FlowLayout.LEFT));
+        row1.add(new JLabel("Количество кубитов (n): "));
+        JSpinner nSpinner = new JSpinner(new SpinnerNumberModel(3, 1, 7, 1));
+        row1.add(nSpinner);
+        JButton genTableBtn = new JButton("Сгенерировать таблицу");
+        row1.add(genTableBtn);
+        JButton checkBtn = new JButton("Проверить стабилизаторность");
+        row1.add(checkBtn);
+
+        JPanel row2 = new JPanel(new FlowLayout(FlowLayout.LEFT));
+        JButton loadCsvBtn = new JButton("Загрузить CSV");
+        JButton exportCsvBtn = new JButton("Экспортировать CSV");
+        row2.add(loadCsvBtn);
+        row2.add(exportCsvBtn);
+        controlPanel.add(row1);
+        controlPanel.add(row2);
+        
+        panel.add(controlPanel, BorderLayout.NORTH);
+
+        // таблица знаков
+        DefaultTableModel signTableModel = new DefaultTableModel(new String[]{"Базисное состояние", "Знак"}, 0);
+        JTable signTable = new JTable(signTableModel);
+        signTable.setRowHeight(25);
+        JComboBox<String> comboBox = new JComboBox<>(new String[]{"+", "-", "0"});
+        signTable.getColumnModel().getColumn(1).setCellEditor(new DefaultCellEditor(comboBox));
+        JScrollPane tableScroll = new JScrollPane(signTable);
+        tableScroll.setBorder(BorderFactory.createTitledBorder("Знаки амплитуд: "));
+        
+        panel.add(tableScroll, BorderLayout.CENTER);
+
+        // область для результата
+        JPanel resultPanel = new JPanel(new BorderLayout());
+        JTextArea resultArea = new JTextArea(15, 50);
+        resultArea.setEditable(false);
+        resultArea.setFont(new Font("Monospaced", Font.PLAIN, 12));
+        JScrollPane resultScroll = new JScrollPane(resultArea);
+        resultScroll.setBorder(BorderFactory.createTitledBorder("Результат"));
+        resultPanel.add(resultScroll, BorderLayout.CENTER);
+        
+        panel.add(resultPanel, BorderLayout.SOUTH);
+
+        // обработчик для кнопки генерации таблицы
+        genTableBtn.addActionListener(e -> {
+            int n = (Integer) nSpinner.getValue();
+            tableGeneration(signTableModel, n);
+
+            resultArea.setText("");
+        });
+
+        // обработчик для кнопки проверки
+        checkBtn.addActionListener(e -> {
+            int n = (Integer) nSpinner.getValue();
+            int expectedRows = 1 << n;
+            if (signTableModel.getRowCount() != expectedRows) {
+                JOptionPane.showMessageDialog(panel, "Пожалуйста сначала сгенерируйте таблицу для выбранного n",
+                        "Ошибка", JOptionPane.ERROR_MESSAGE);
+                return;
+            }
+            List<String> signs = new ArrayList<>();
+            for (int row = 0; row < signTableModel.getRowCount(); row++) {
+                signs.add((String) signTableModel.getValueAt(row, 1));
+            }
+
+            // отправка запроса серверу
+            try {
+                GraphStateClient client = new GraphStateClient();
+                Map<String, Object> response = client.checkStabilizer(n, signs);
+                boolean isStab = (boolean) response.get("is_stabilizer");
+
+                StringBuilder sb = new StringBuilder();
+
+                if (isStab) {
+                    sb.append("СОСТОЯНИЕ ЯВЛЯЕТСЯ СТАБИЛИЗАТОРНЫМ\n\n");
+                    sb.append("Генераторы: ").append(response.get("generators")).append("\n");
+                    sb.append("Ранг: ").append(response.get("rank")).append("\n");
+                    List<?> opsList = (List<?>) response.get("ops_and_vecs");
+                    sb.append("Найденные операторы: ").append(opsList).append("\n");
+                    sb.append("Количество операторов: ").append(opsList.size()).append("\n");
+
+                    sb.append("\nОператоры:\n");
+                    List<?> ops = (List<?>) response.get("ops_and_vecs");
+                    if (ops != null) {
+                        for (Object op : ops) {
+                            sb.append(op.toString()).append("\n");
+                        }
+                    }
+                } else {
+                    sb.append("СОСТОЯНИЕ НЕ ЯВЛЯЕТСЯ СТАБИЛИЗАТОРНЫМ\n");
+                    sb.append("Причина: ").append(response.get("reason")).append("\n");
+                }
+
+                resultArea.setText(sb.toString());
+            } catch (Exception ex) {
+                resultArea.setText("Ошибка: " + ex.getMessage());
+                ex.printStackTrace();
+            }
+        });
+
+        loadCsvBtn.addActionListener(ev ->
+                loadSignsFromCSV(signTable, signTableModel, nSpinner)
+        );
+
+        exportCsvBtn.addActionListener(
+                ev -> exportSignsToCSV(signTable, signTableModel, (Integer) nSpinner.getValue())
+        );
+
+        return panel;
+    }
+
+    private void tableGeneration(DefaultTableModel signTableModel, Integer n) {
+        int rows = 1 << n;
+        signTableModel.setRowCount(0);
+        for (int i = 0; i < rows; i++) {
+            String binary = Integer.toBinaryString(i);
+            String padded = String.format("%" + n + "s", binary).replace(' ', '0');
+            String basisStr = "|" + padded + ">";
+            signTableModel.addRow(new Object[]{basisStr, "+"});
+        }
+    }
+
+    public JPanel buildEntanglementPanel() {
+        JPanel panel = new JPanel(new BorderLayout(10, 10));
+        panel.setBorder(BorderFactory.createEmptyBorder(10, 10, 10, 10));
+
+        // панель для управллвения
+        JPanel controlPanel = new JPanel();
+        controlPanel.setLayout(new BoxLayout(controlPanel, BoxLayout.Y_AXIS));
+        JPanel row1 = new JPanel(new FlowLayout(FlowLayout.LEFT));
+        row1.add(new JLabel("Количество кубитов (n): "));
+        JSpinner nSpinner = new JSpinner(new SpinnerNumberModel(3, 1, 7, 1));
+        row1.add(nSpinner);
+        JButton genTableBtn = new JButton("Сгенерировать таблицу");
+        row1.add(genTableBtn);
+        JButton checkBtn = new JButton("Проверить полную стабилизаторность");
+        row1.add(checkBtn);
+
+        JPanel row2 = new JPanel(new FlowLayout(FlowLayout.LEFT));
+        JButton loadCsvBtn = new JButton("Загрузить CSV");
+        JButton exportCsvBtn = new JButton("Экспортировать CSV");
+        row2.add(loadCsvBtn);
+        row2.add(exportCsvBtn);
+        controlPanel.add(row1);
+        controlPanel.add(row2);
+
+        panel.add(controlPanel, BorderLayout.NORTH);
+
+        // таблица знаков
+        DefaultTableModel signTableModel = new DefaultTableModel(new String[]{"Базисное состояние", "Знак"}, 0);
+        JTable signTable = new JTable(signTableModel);
+        signTable.setRowHeight(25);
+        JComboBox<String> comboBox = new JComboBox<>(new String[]{"+", "-"});
+        signTable.getColumnModel().getColumn(1).setCellEditor(new DefaultCellEditor(comboBox));
+        JScrollPane tableScroll = new JScrollPane(signTable);
+        tableScroll.setBorder(BorderFactory.createTitledBorder("Знаки амплитуд"));
+        tableScroll.setPreferredSize(new Dimension(300, 0));
+
+        // панель результатов справа
+        JPanel resultPanel = new JPanel(new BorderLayout());
+        JTextArea resultArea = new JTextArea(8, 20);
+        resultArea.setEditable(false);
+        resultPanel.add(new JScrollPane(resultArea), BorderLayout.CENTER);
+        JLabel pyramidLabel = new JLabel();
+        pyramidLabel.setHorizontalAlignment(SwingConstants.CENTER);
+        // полоса прокрутки для изображения если оно большое
+        JScrollPane imageScroll = new JScrollPane(pyramidLabel);
+        resultPanel.add(imageScroll, BorderLayout.SOUTH);
+
+        // панель результатов в JScrollPane (если текст + картинка слишком высокие)
+        JScrollPane resultScrollPane = new JScrollPane(resultPanel);
+        resultScrollPane.setBorder(null);
+        resultScrollPane.getViewport().setScrollMode(JViewport.BACKINGSTORE_SCROLL_MODE);
+
+        // горизонтальный сплит: таблица слева, результат справа
+        JSplitPane splitPane = new JSplitPane(JSplitPane.HORIZONTAL_SPLIT, tableScroll, resultScrollPane);
+        splitPane.setContinuousLayout(true);
+        panel.add(splitPane, BorderLayout.CENTER);
+
+        // генератор таблицы
+        java.util.function.Consumer<Integer> generateTable = n -> {
+            int rows = 1 << n;
+            signTableModel.setRowCount(0);
+            for (int i = 0; i < rows; i++) {
+                String basis = formatBasis(i, n);
+                signTableModel.addRow(new Object[]{basis, "+"});
+            }
+
+            resultArea.setText("");
+            pyramidLabel.setIcon(null);
+        };
+
+        genTableBtn.addActionListener(e -> {
+            int n = (Integer) nSpinner.getValue();
+            generateTable.accept(n);
+        });
+
+
+        checkBtn.addActionListener(e -> {
+            int n = (Integer) nSpinner.getValue();
+            int rows = 1 << n;
+            if (signTableModel.getRowCount() != rows) {
+                JOptionPane.showMessageDialog(panel, "Пожалуйста сначала сгенерируйте таблицу для n=" + n);
+                return;
+            }
+
+            List<String> signs = new ArrayList<>();
+            for (int row = 0; row < rows; row++) {
+                signs.add((String) signTableModel.getValueAt(row, 1));
+            }
+            try {
+                GraphStateClient client = new GraphStateClient();
+                Map<String, Object> response = client.checkSeparability(n, signs);
+                boolean isSep = (boolean) response.get("is_separable");
+                StringBuilder sb = new StringBuilder();
+                if (isSep) {
+                    sb.append("Состояние полностью сепарабельно\n\n");
+                    sb.append("Разложение на однокубитные состояния:\n");
+
+                    List<?> t = (List<?>) response.get("t");
+                    if (t != null && t.size() == n) {
+                        for (int i = 0; i < n; i++) {
+                            Number val = (Number) t.get(i);
+                            char signChar = val.doubleValue() == 1.0 ? '+' : '-';
+                            sb.append("    кубит ").append(i+1).append(": |0> + ").append(signChar).append("|1>\n");
+                        }
+                    } else {
+                        sb.append("Не удалось получить разложение на однокубитные состояния\n");
+                    }
+                } else {
+                    sb.append("Состояние запутано\n");
+                    if (response.containsKey("mismatches")) {
+                        List<Integer> mismatches = (List<Integer>) response.get("mismatches");
+                        if (!mismatches.isEmpty()) {
+                            sb.append("Несовпадения в базисах:\n");
+                            for (int mask : mismatches) {
+                                sb.append("  ").append(formatBasis(mask, n)).append("\n");
+                            }
+                        }
+                    }
+                }
+                resultArea.setText(sb.toString());
+                if (response.containsKey("image")) {
+                    String base64Image = (String) response.get("image");
+                    byte[] imageBytes = Base64.getDecoder().decode(base64Image);
+                    ImageIcon icon = new ImageIcon(imageBytes);
+                    pyramidLabel.setIcon(icon);
+                } else {
+                    pyramidLabel.setIcon(null);
+                }
+            } catch (Exception ex) {
+                resultArea.setText("Ошибка: " + ex.getMessage());
+                ex.printStackTrace();
+            }
+        });
+
+        loadCsvBtn.addActionListener(ev -> loadSignsFromCSV(signTable, signTableModel, nSpinner));
+        exportCsvBtn.addActionListener(ev -> exportSignsToCSV(signTable, signTableModel, (Integer) nSpinner.getValue()));
+
+        generateTable.accept(3);
+        return panel;
     }
 }

@@ -17,6 +17,7 @@ public class GraphStateClient {
     private static final String BASE_URL = "http://localhost:5000";
     private final ObjectMapper mapper = new ObjectMapper();
 
+    // запрос для вкладки "Построение состояния по графу"
     public Map<String, Object> buildState(String vertices, String edges) throws IOException {
         String url = BASE_URL + "/build_state";
         Map<String, Object> request = Map.of("vertices", parseVertices(vertices),
@@ -45,10 +46,26 @@ public class GraphStateClient {
         return edges;
     }
 
+    // запрос для вкладки "Проверка состояния на графовость"
     public Map<String, Object> checkGraphState(int n, List<String> signs) throws IOException {
         String url = BASE_URL + "/check_graph_submit";
         Map<String, Object> request = Map.of("n", n, "signs", signs);
 
+        return post(url, request);
+    }
+
+    // запрос для вкладки "Проверка состояния на стабилизаторность"
+    public Map<String, Object> checkStabilizer(int n, List<String> signs) throws IOException {
+        String url = BASE_URL + "/check_stabilizer_submit";
+        Map<String, Object> request = Map.of("n", n, "signs", signs);
+
+        return post(url, request);
+    }
+
+    // запрос для вкладки "Анализ запутанности"
+    public Map<String, Object> checkSeparability(int n, List<String> signs) throws IOException {
+        String url = BASE_URL + "/check_separable_submit";
+        Map<String, Object> request = Map.of("n", n, "signs", signs);
         return post(url, request);
     }
 
