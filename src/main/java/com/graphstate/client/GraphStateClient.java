@@ -67,6 +67,7 @@ public class GraphStateClient {
     public Map<String, Object> checkSeparability(int n, List<String> signs) throws IOException {
         String url = BASE_URL + "/check_separable_submit";
         Map<String, Object> request = Map.of("n", n, "signs", signs);
+
         return post(url, request);
     }
 
@@ -82,7 +83,6 @@ public class GraphStateClient {
             post_request.setEntity(new StringEntity(json));
             post_request.setHeader("Content-Type", "application/json");
 
-
 //            HttpPost post_request = new HttpPost(url);
 //            post_request.setEntity(new StringEntity(json));
 //            post_request.setHeader("Content-Type", "application/json");
@@ -97,6 +97,7 @@ public class GraphStateClient {
                 String jsonResponse = EntityUtils.toString(response.getEntity());
                 Map<String, Object> result = mapper.readValue(jsonResponse, Map.class); // JSON -> POJO десериализация ответа
                 result.put("_statusCode", statusCode);
+
                 return result;
             }
         }

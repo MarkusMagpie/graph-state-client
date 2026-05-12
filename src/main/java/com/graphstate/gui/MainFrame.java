@@ -105,7 +105,12 @@ public class MainFrame extends JFrame {
 
         panel.add(inputPanel, BorderLayout.NORTH);
 
-        tableModel = new DefaultTableModel(new String[]{"Базисное состояние", "Амплитуда"}, 0);
+        tableModel = new DefaultTableModel(new String[]{"Базисное состояние", "Амплитуда"}, 0) {
+            @Override
+            public boolean isCellEditable(int row, int col) {
+                return false;
+            }
+        };
         amplitudesTable = new JTable(tableModel);
         amplitudesTable.setFillsViewportHeight(true);
         JScrollPane scrollPane = new JScrollPane(amplitudesTable);
@@ -285,7 +290,10 @@ public class MainFrame extends JFrame {
 //                    logInfo("Состояние не графовое");
                 }
             } catch (Exception ex) {
-                logError("Ошибка при проверке: " + ex.getMessage());
+//                logError("Ошибка при проверке: " + ex.getMessage());
+                JOptionPane.showMessageDialog(MainFrame.this,
+                        "Ошибка при проверке состояния на графовость: ",
+                        "Ошибка", JOptionPane.ERROR_MESSAGE);
                 ex.printStackTrace();
             }
         });
@@ -575,7 +583,7 @@ public class MainFrame extends JFrame {
         resultPanel.add(new JScrollPane(resultArea), BorderLayout.CENTER);
         JLabel pyramidLabel = new JLabel();
         int maxWidth = 620;
-        int maxHeight = 500;
+        int maxHeight = 350;
         pyramidLabel.setPreferredSize(new Dimension(maxWidth, maxHeight));
         pyramidLabel.setHorizontalAlignment(SwingConstants.CENTER);
         // полоса прокрутки для изображения если оно большое
@@ -616,9 +624,23 @@ public class MainFrame extends JFrame {
             for (int row = 0; row < rows; row++) {
                 signs.add((String) signTableModel.getValueAt(row, 1));
             }
+
+            String params = "n=" + n + ", signs=" + signs;
+            long start = System.currentTimeMillis();
             try {
                 GraphStateClient client = new GraphStateClient();
                 Map<String, Object> response = client.checkSeparability(n, signs);
+
+                long duration = System.currentTimeMillis() - start;
+                int status = (int) response.getOrDefault("_statusCode", 500);
+                logHttp("POST", "/check_separable_submit", params, status, duration);
+
+                if (status != 200) {
+//                    logError("Сервер вернул ошибку " + status);
+                    resultArea.setText("Ошибка сервера: статус " + status);
+                    return;
+                }
+
                 boolean isSep = (boolean) response.get("is_separable");
                 StringBuilder sb = new StringBuilder();
                 if (isSep) {
@@ -635,6 +657,7 @@ public class MainFrame extends JFrame {
                     } else {
                         sb.append("Не удалось получить разложение на однокубитные состояния\n");
                     }
+                    // logInfo("Состояние полностью сепарабельно");
                 } else {
                     sb.append("Состояние запутано\n");
                     if (response.containsKey("mismatches")) {
@@ -646,8 +669,10 @@ public class MainFrame extends JFrame {
                             }
                         }
                     }
+//                    logInfo("Состояние запутано");
                 }
                 resultArea.setText(sb.toString());
+
                 if (response.containsKey("image")) {
                     String base64Image = (String) response.get("image");
                     byte[] imageBytes = Base64.getDecoder().decode(base64Image);
@@ -657,8 +682,10 @@ public class MainFrame extends JFrame {
                     pyramidLabel.setIcon(icon);
                 } else {
                     pyramidLabel.setIcon(null);
+//                    logError("Изображение не получено");
                 }
             } catch (Exception ex) {
+                // logError("Ошибка: " + ex.getMessage());
                 resultArea.setText("Ошибка: " + ex.getMessage());
                 ex.printStackTrace();
             }
