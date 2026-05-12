@@ -1,6 +1,7 @@
 package com.graphstate.gui;
 
 import com.graphstate.client.GraphStateClient;
+import com.graphstate.util.BasisFormatter;
 
 import javax.imageio.ImageIO;
 import javax.swing.*;
@@ -29,6 +30,13 @@ public class MainFrame extends JFrame {
     }
 
     public void initUI() {
+        statusArea = new JTextArea(5, 80);
+        statusArea.setEditable(false);
+        statusArea.setBackground(new Color(240, 240, 240));
+        JScrollPane statusScroll = new JScrollPane(statusArea);
+        statusScroll.setBorder(BorderFactory.createTitledBorder("HTTP логи: "));
+        statusScroll.setPreferredSize(new Dimension(0, 120));
+
         // главная панель с вкладками
         JTabbedPane tabbedPane = new JTabbedPane();
         tabbedPane.setTabLayoutPolicy(JTabbedPane.SCROLL_TAB_LAYOUT);
@@ -38,6 +46,29 @@ public class MainFrame extends JFrame {
         tabbedPane.addTab("Анализ запутанности", buildEntanglementPanel());
 
         add(tabbedPane);
+        add(statusScroll, BorderLayout.SOUTH);
+    }
+
+    private void logHttp(String method, String url, String params, int statusCode, long durationMs) {
+        String msg = String.format("%s %s HTTP/1.1 | %s -> %d (%d ms)", method, url, params, statusCode, durationMs);
+        SwingUtilities.invokeLater(() -> {
+            statusArea.append(msg + "\n");
+            statusArea.setCaretPosition(statusArea.getDocument().getLength());
+        });
+    }
+
+    private void logError(String message) {
+        SwingUtilities.invokeLater(() -> {
+            statusArea.append("!) " + message + "\n");
+            statusArea.setCaretPosition(statusArea.getDocument().getLength());
+        });
+    }
+
+    private void logInfo(String message) {
+        SwingUtilities.invokeLater(() -> {
+            statusArea.append("ℹ) " + message + "\n");
+            statusArea.setCaretPosition(statusArea.getDocument().getLength());
+        });
     }
 
     public JPanel buildGraphPanel() {
@@ -81,15 +112,6 @@ public class MainFrame extends JFrame {
         scrollPane.setBorder(BorderFactory.createTitledBorder("Амплитуды графового состояния"));
         panel.add(scrollPane, BorderLayout.CENTER);
 
-        // строка для сообщений об ошибках
-        statusArea = new JTextArea(2, 40);
-        statusArea.setEditable(false);
-        statusArea.setBackground(new Color(240, 240, 240));
-        JScrollPane statusScroll = new JScrollPane(statusArea);
-        statusScroll.setBorder(BorderFactory.createTitledBorder("Статус"));
-        statusScroll.setPreferredSize(new Dimension(0, 60));
-        panel.add(statusScroll, BorderLayout.SOUTH);
-
         buildBtn.addActionListener(e -> buildState());
 
         return panel;
@@ -100,32 +122,55 @@ public class MainFrame extends JFrame {
         String edges = edgesField.getText().trim();
 
         if (vertices.isEmpty() || edges.isEmpty()) {
-            statusArea.setText("ошибка: поля вершин и ребер не могут быть пустыми");
+//            logError("Поля вершин и рёбер не могут быть пустыми");
+            JOptionPane.showMessageDialog(MainFrame.this,
+                    "Поля вершин и рёбер не могут быть пустыми",
+                    "Ошибка", JOptionPane.ERROR_MESSAGE);
             return;
         }
 
         tableModel.setRowCount(0);
 
+        String params = "vertices=" + vertices + ", edges=" + edges;
+        long start = System.currentTimeMillis();
+
         try {
             GraphStateClient client = new GraphStateClient();
             Map<String, Object> result = client.buildState(vertices, edges); // http response
 
-            Object ampsObj = result.get("amplitudes"); // из json ответа извлекаю ключ
-            if (!(ampsObj instanceof List ampsList)) {
-                statusArea.setText("ошибка: поле 'amplitudes' не является списком.");
+            long duration = System.currentTimeMillis() - start;
+            int status = (int) result.get("_statusCode");
+            logHttp("POST", "/build_state", params, status, duration);
+            if (status != 200) {
+//                logError("Сервер вернул статус " + status);
+                JOptionPane.showMessageDialog(MainFrame.this,
+                        "Сервер вернул статус " + status,
+                        "Ошибка", JOptionPane.ERROR_MESSAGE);
                 return;
             }
 
+            Object ampsObj = result.get("amplitudes"); // из json ответа извлекаю ключ
+            if (!(ampsObj instanceof List)) {
+//                logError("Поле 'amplitudes' не является списком");
+                JOptionPane.showMessageDialog(MainFrame.this,
+                        "Поле 'amplitudes' не является списком",
+                        "Ошибка", JOptionPane.ERROR_MESSAGE);
+                return;
+            }
+
+            List<?> ampsList = (List<?>) ampsObj;
             int n = (int) Math.round(Math.log(ampsList.size()) / Math.log(2)); // число вершин
             for (int i = 0; i < ampsList.size(); i++) {
-                String binary = Integer.toBinaryString(i);
-                String padded = String.format("%" + n + "s", binary).replace(' ', '0');
-                String basisStr = "|" + padded + ">";
+                String basisStr = BasisFormatter.format(i, n);
                 tableModel.addRow(new Object[]{basisStr, ampsList.get(i).toString()});
             }
-            statusArea.setText("Графовое состояние успешно построено. Всего амплитуд: " + "2^" + n + " = " + ampsList.size());
+
+//            logInfo("Построено состояние: 2^" + n + " = " + ampsList.size() + " амплитуд");
         } catch (Exception ex) {
-            statusArea.setText("Ошибка: " + ex.getMessage());
+//            logError("Ошибка: " + ex.getMessage());
+            JOptionPane.showMessageDialog(MainFrame.this,
+                    "Ошибка: " + ex.getMessage(),
+                    "Ошибка", JOptionPane.ERROR_MESSAGE);
             ex.printStackTrace();
         }
     }
@@ -184,38 +229,28 @@ public class MainFrame extends JFrame {
         graphPanel.setMaximumSize(new Dimension(Integer.MAX_VALUE, 200));
         resultPanel.add(graphPanel, BorderLayout.SOUTH);
 
-        JTextArea statusArea = new JTextArea(2, 40);
-        statusArea.setEditable(false);
-        statusArea.setBackground(new Color(240, 240, 240));
-        JScrollPane statusScroll = new JScrollPane(statusArea);
-        statusScroll.setBorder(BorderFactory.createTitledBorder("Статус"));
-        statusScroll.setPreferredSize(new Dimension(0, 60));
-
-        JPanel southContainer = new JPanel();
-        southContainer.setLayout(new BoxLayout(southContainer, BoxLayout.Y_AXIS));
-        southContainer.add(resultPanel);
-        southContainer.add(statusScroll);
-
-        panel.add(southContainer, BorderLayout.SOUTH);
+        panel.add(resultPanel, BorderLayout.SOUTH);
 
         // действие при генерации таблицы
         genTableBtn.addActionListener(e -> {
             int n = (Integer) nSpinner.getValue();
-            statusArea.setText("Генерация таблицы для n = " + n + "...");
             tableGeneration(signTableModel, n);
 
             resultArea.setText("");
             graphPanel.setGraph(0, null);
 
-            statusArea.setText("Таблица для n = " + n + " сгенерирована. Количество базисов: " + (1 << n));
+//            statusArea.setText("Таблица для n = " + n + " сгенерирована. Количество базисов: " + (1 << n));
+//            logInfo("Таблица для n = " + n + " сгенерирована. Количество базисов: " + (1 << n));
         });
 
         checkBtn.addActionListener(e -> {
             int n = (Integer) nSpinner.getValue();
             int expectedRows = (1 << n);
             if (signTableModel.getRowCount() != expectedRows) {
-//                JOptionPane.showMessageDialog(panel, "Сначала сгенерируйте таблицу для выбранного n", "Ошибка", JOptionPane.ERROR_MESSAGE);
-                statusArea.setText("Пожалуйста, сначала сгенерируйте таблицу для выбранного n");
+                JOptionPane.showMessageDialog(panel,
+                        "Пожалуйста, сначала сгенерируйте таблицу для выбранного n",
+                        "Ошибка", JOptionPane.ERROR_MESSAGE);
+//                logError("Пожалуйста, сначала сгенерируйте таблицу для выбранного n");
                 return;
             }
 
@@ -225,29 +260,32 @@ public class MainFrame extends JFrame {
                 signs.add((String) signTableModel.getValueAt(row, 1));
             }
 
-            statusArea.setText("Отправка HTTP запроса на сервер...");
-            resultArea.setText(""); // очистить результат
-            graphPanel.setGraph(0, null);
+            String params = "n=" + n + ", signs=" + signs;
+            long start = System.currentTimeMillis();
 
             try {
                 GraphStateClient client = new GraphStateClient();
                 Map<String, Object> response = client.checkGraphState(n, signs);
+                long duration = System.currentTimeMillis() - start;
+                int status = (int) response.get("_statusCode");
+                logHttp("POST", "/check_graph_submit", params, status, duration);
+
                 boolean isGraph = (boolean) response.get("is_graph"); // ключ из http ответа
 
-                statusArea.setText("С сервера получен HTTP ответ");
                 if (isGraph) {
                     List<List<Integer>> edges = (List<List<Integer>>) response.get("edges");
                     resultArea.setText("Состояние является графовым\nНайденный граф: " + edges);
+//                    logInfo("Состояние является графовым. Найденный граф: " + edges.size());
 
                     // визуализация графа по ребрам из http ответа
                     graphPanel.setGraph(n, edges);
                 } else {
                     resultArea.setText("Состояние не является графовым");
                     graphPanel.setGraph(0, null);
+//                    logInfo("Состояние не графовое");
                 }
             } catch (Exception ex) {
-                statusArea.setText("Ошибка: " + ex.getMessage());
-//                resultArea.setText("Ошибка: " + ex.getMessage());
+                logError("Ошибка при проверке: " + ex.getMessage());
                 ex.printStackTrace();
             }
         });
@@ -262,18 +300,12 @@ public class MainFrame extends JFrame {
         return panel;
     }
 
-    public String formatBasis(int i, int n) {
-        String binary = Integer.toBinaryString(i);
-        String padded = String.format("%" + n + "s", binary).replace(' ', '0');
-        return "|" + padded + ">";
-    }
-
     private void generateTableForN(int n, DefaultTableModel signTableModel) {
         int rows = 1 << n;
         signTableModel.setRowCount(0);
         for (int i = 0; i < rows; i++) {
-            String basis = formatBasis(i, n);
-            signTableModel.addRow(new Object[]{basis, "+"});
+            String basisStr = BasisFormatter.format(i, n);
+            signTableModel.addRow(new Object[]{basisStr, "+"});
         }
     }
 
@@ -341,8 +373,7 @@ public class MainFrame extends JFrame {
         }
     }
 
-
-
+    // --------------------------------------------------------------- "Проверка состояния на стабилизаторность"
     public JPanel buildCheckStabilizerPanel() {
         JPanel panel = new JPanel(new BorderLayout(10, 10));
         panel.setBorder(BorderFactory.createEmptyBorder(10, 10, 10, 10));
@@ -366,7 +397,6 @@ public class MainFrame extends JFrame {
         row2.add(exportCsvBtn);
         controlPanel.add(row1);
         controlPanel.add(row2);
-        
         panel.add(controlPanel, BorderLayout.NORTH);
 
         // таблица знаков
@@ -377,7 +407,6 @@ public class MainFrame extends JFrame {
         signTable.getColumnModel().getColumn(1).setCellEditor(new DefaultCellEditor(comboBox));
         JScrollPane tableScroll = new JScrollPane(signTable);
         tableScroll.setBorder(BorderFactory.createTitledBorder("Знаки амплитуд: "));
-        
         panel.add(tableScroll, BorderLayout.CENTER);
 
         // область для результата
@@ -388,49 +417,48 @@ public class MainFrame extends JFrame {
         JScrollPane resultScroll = new JScrollPane(resultArea);
         resultScroll.setBorder(BorderFactory.createTitledBorder("Результат"));
         resultPanel.add(resultScroll, BorderLayout.CENTER);
-
-        JTextArea statusArea = new JTextArea(2, 40);
-        statusArea.setEditable(false);
-        statusArea.setBackground(new Color(240, 240, 240));
-        JScrollPane statusScroll = new JScrollPane(statusArea);
-        statusScroll.setBorder(BorderFactory.createTitledBorder("Статус"));
-        statusScroll.setPreferredSize(new Dimension(0, 60));
-
-        JPanel southContainer = new JPanel();
-        southContainer.setLayout(new BoxLayout(southContainer, BoxLayout.Y_AXIS));
-        southContainer.add(resultPanel);
-        southContainer.add(statusScroll);
-
-        panel.add(southContainer, BorderLayout.SOUTH);
-        
-//        panel.add(resultPanel, BorderLayout.SOUTH);
+        panel.add(resultPanel, BorderLayout.SOUTH);
 
         // обработчик для кнопки генерации таблицы
         genTableBtn.addActionListener(e -> {
             int n = (Integer) nSpinner.getValue();
             tableGeneration(signTableModel, n);
-
             resultArea.setText("");
         });
 
-        // обработчик для кнопки проверки
+        // обработчик для кнопки проверки стабилллизаторности
         checkBtn.addActionListener(e -> {
             int n = (Integer) nSpinner.getValue();
             int expectedRows = 1 << n;
             if (signTableModel.getRowCount() != expectedRows) {
-                JOptionPane.showMessageDialog(panel, "Пожалуйста сначала сгенерируйте таблицу для выбранного n",
+                JOptionPane.showMessageDialog(panel,
+                        "Пожалуйста, сначала сгенерируйте таблицу для выбранного n",
                         "Ошибка", JOptionPane.ERROR_MESSAGE);
+//                logError("Пожалуйста, сначала сгенерируйте таблицу для выбранного n");
                 return;
             }
+
             List<String> signs = new ArrayList<>();
             for (int row = 0; row < signTableModel.getRowCount(); row++) {
                 signs.add((String) signTableModel.getValueAt(row, 1));
             }
 
+            String params = "n=" + n + ", signs=" + signs;
+            long start = System.currentTimeMillis();
             // отправка запроса серверу
             try {
                 GraphStateClient client = new GraphStateClient();
                 Map<String, Object> response = client.checkStabilizer(n, signs);
+                long duration = System.currentTimeMillis() - start;
+                int status = (int) response.getOrDefault("_statusCode", 500);
+                logHttp("POST", "/check_stabilizer_submit", params, status, duration);
+
+                if (status != 200) {
+//                    logError("Сервер вернул ошибку " + status);
+                    resultArea.setText("Сервер вернул ошибку " + status);
+                    return;
+                }
+
                 boolean isStab = (boolean) response.get("is_stabilizer");
 
                 StringBuilder sb = new StringBuilder();
@@ -444,19 +472,19 @@ public class MainFrame extends JFrame {
                     sb.append("Количество операторов: ").append(opsList.size()).append("\n");
 
                     sb.append("\nОператоры:\n");
-                    List<?> ops = (List<?>) response.get("ops_and_vecs");
-                    if (ops != null) {
-                        for (Object op : ops) {
-                            sb.append(op.toString()).append("\n");
-                        }
+                    for (Object op : opsList) {
+                        sb.append(op.toString()).append("\n");
                     }
+//                    logInfo("Состояние стабилизаторное, ранг " + response.get("rank"));
                 } else {
                     sb.append("СОСТОЯНИЕ НЕ ЯВЛЯЕТСЯ СТАБИЛИЗАТОРНЫМ\n");
                     sb.append("Причина: ").append(response.get("reason")).append("\n");
+                    // logInfo("Состояние не стабилизаторное: " + response.get("reason"));
                 }
 
                 resultArea.setText(sb.toString());
             } catch (Exception ex) {
+//                logError("Ошибка при проверке: " + ex.getMessage());
                 resultArea.setText("Ошибка: " + ex.getMessage());
                 ex.printStackTrace();
             }
@@ -479,9 +507,7 @@ public class MainFrame extends JFrame {
         int rows = 1 << n;
         signTableModel.setRowCount(0);
         for (int i = 0; i < rows; i++) {
-            String binary = Integer.toBinaryString(i);
-            String padded = String.format("%" + n + "s", binary).replace(' ', '0');
-            String basisStr = "|" + padded + ">";
+            String basisStr = BasisFormatter.format(i, n);
             signTableModel.addRow(new Object[]{basisStr, "+"});
         }
     }
@@ -580,7 +606,9 @@ public class MainFrame extends JFrame {
             int n = (Integer) nSpinner.getValue();
             int rows = 1 << n;
             if (signTableModel.getRowCount() != rows) {
-                JOptionPane.showMessageDialog(panel, "Пожалуйста сначала сгенерируйте таблицу для n=" + n);
+                JOptionPane.showMessageDialog(panel,
+                        "Пожалуйста, сначала сгенерируйте таблицу для выбранного n",
+                        "Ошибка", JOptionPane.ERROR_MESSAGE);
                 return;
             }
 
@@ -614,7 +642,7 @@ public class MainFrame extends JFrame {
                         if (!mismatches.isEmpty()) {
                             sb.append("Несовпадения в базисных состояниях:\n");
                             for (int mask : mismatches) {
-                                sb.append("  ").append(formatBasis(mask, n)).append("\n");
+                                sb.append("  ").append(BasisFormatter.format(mask, n)).append("\n");
                             }
                         }
                     }

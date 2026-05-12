@@ -1,6 +1,7 @@
 package com.graphstate.client;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.apache.http.client.methods.CloseableHttpResponse;
 import org.apache.http.client.methods.HttpPost;
 import org.apache.http.entity.StringEntity;
 import org.apache.http.impl.client.CloseableHttpClient;
@@ -74,17 +75,30 @@ public class GraphStateClient {
     // метод для отправки сериализованного http запроса, получения http ответа и его десериализации
     // https://habr.com/ru/companies/otus/articles/687004/
     public Map<String, Object> post(String url, Map<String, Object> data) throws IOException {
-        CloseableHttpClient client = HttpClients.createDefault();
-        String json = mapper.writeValueAsString(data); // POJO -> JSON сериализация
-        // пример: {"vertices": [1,2,3,4], "edges": [[1,2],[2,3],[3,4]]}
-        HttpPost post_request = new HttpPost(url);
-        post_request.setEntity(new StringEntity(json));
-        post_request.setHeader("Content-Type", "application/json");
+        try (CloseableHttpClient client = HttpClients.createDefault()) {
+            HttpPost post_request = new HttpPost(url);
+            String json = mapper.writeValueAsString(data); // POJO -> JSON сериализация
+            // пример: {"vertices": [1,2,3,4], "edges": [[1,2],[2,3],[3,4]]}
+            post_request.setEntity(new StringEntity(json));
+            post_request.setHeader("Content-Type", "application/json");
 
-        var http_response = client.execute(post_request);
-        String jsonResponse = EntityUtils.toString(http_response.getEntity());
 
-        return mapper.readValue(jsonResponse, Map.class); // JSON -> POJO десериализация ответа
+//            HttpPost post_request = new HttpPost(url);
+//            post_request.setEntity(new StringEntity(json));
+//            post_request.setHeader("Content-Type", "application/json");
+//
+//            var http_response = client.execute(post_request);
+//            String jsonResponse = EntityUtils.toString(http_response.getEntity());
+//
+//            return mapper.readValue(jsonResponse, Map.class);
 
+            try (CloseableHttpResponse response = client.execute(post_request)) {
+                int statusCode = response.getStatusLine().getStatusCode();
+                String jsonResponse = EntityUtils.toString(response.getEntity());
+                Map<String, Object> result = mapper.readValue(jsonResponse, Map.class); // JSON -> POJO десериализация ответа
+                result.put("_statusCode", statusCode);
+                return result;
+            }
+        }
     }
 }
