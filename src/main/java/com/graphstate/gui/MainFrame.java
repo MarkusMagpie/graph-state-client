@@ -2,13 +2,12 @@ package com.graphstate.gui;
 
 import com.graphstate.client.GraphStateClient;
 
+import javax.imageio.ImageIO;
 import javax.swing.*;
 import javax.swing.table.DefaultTableModel;
 import java.awt.*;
-import java.io.BufferedReader;
-import java.io.BufferedWriter;
-import java.io.FileReader;
-import java.io.FileWriter;
+import java.awt.image.BufferedImage;
+import java.io.*;
 import java.util.ArrayList;
 import java.util.Base64;
 import java.util.Map;
@@ -185,22 +184,38 @@ public class MainFrame extends JFrame {
         graphPanel.setMaximumSize(new Dimension(Integer.MAX_VALUE, 200));
         resultPanel.add(graphPanel, BorderLayout.SOUTH);
 
-        panel.add(resultPanel, BorderLayout.SOUTH);
+        JTextArea statusArea = new JTextArea(2, 40);
+        statusArea.setEditable(false);
+        statusArea.setBackground(new Color(240, 240, 240));
+        JScrollPane statusScroll = new JScrollPane(statusArea);
+        statusScroll.setBorder(BorderFactory.createTitledBorder("Статус"));
+        statusScroll.setPreferredSize(new Dimension(0, 60));
+
+        JPanel southContainer = new JPanel();
+        southContainer.setLayout(new BoxLayout(southContainer, BoxLayout.Y_AXIS));
+        southContainer.add(resultPanel);
+        southContainer.add(statusScroll);
+
+        panel.add(southContainer, BorderLayout.SOUTH);
 
         // действие при генерации таблицы
         genTableBtn.addActionListener(e -> {
             int n = (Integer) nSpinner.getValue();
+            statusArea.setText("Генерация таблицы для n = " + n + "...");
             tableGeneration(signTableModel, n);
 
             resultArea.setText("");
             graphPanel.setGraph(0, null);
+
+            statusArea.setText("Таблица для n = " + n + " сгенерирована. Количество базисов: " + (1 << n));
         });
 
         checkBtn.addActionListener(e -> {
             int n = (Integer) nSpinner.getValue();
             int expectedRows = (1 << n);
             if (signTableModel.getRowCount() != expectedRows) {
-                JOptionPane.showMessageDialog(panel, "Сначала сгенерируйте таблицу для выбранного n", "Ошибка", JOptionPane.ERROR_MESSAGE);
+//                JOptionPane.showMessageDialog(panel, "Сначала сгенерируйте таблицу для выбранного n", "Ошибка", JOptionPane.ERROR_MESSAGE);
+                statusArea.setText("Пожалуйста, сначала сгенерируйте таблицу для выбранного n");
                 return;
             }
 
@@ -210,24 +225,29 @@ public class MainFrame extends JFrame {
                 signs.add((String) signTableModel.getValueAt(row, 1));
             }
 
-            // отправка запроса
+            statusArea.setText("Отправка HTTP запроса на сервер...");
+            resultArea.setText(""); // очистить результат
+            graphPanel.setGraph(0, null);
+
             try {
                 GraphStateClient client = new GraphStateClient();
                 Map<String, Object> response = client.checkGraphState(n, signs);
                 boolean isGraph = (boolean) response.get("is_graph"); // ключ из http ответа
 
+                statusArea.setText("С сервера получен HTTP ответ");
                 if (isGraph) {
                     List<List<Integer>> edges = (List<List<Integer>>) response.get("edges");
                     resultArea.setText("Состояние является графовым\nНайденный граф: " + edges);
 
-                    // визуализация графа по edges
+                    // визуализация графа по ребрам из http ответа
                     graphPanel.setGraph(n, edges);
                 } else {
                     resultArea.setText("Состояние не является графовым");
                     graphPanel.setGraph(0, null);
                 }
             } catch (Exception ex) {
-                resultArea.setText("Ошибка: " + ex.getMessage());
+                statusArea.setText("Ошибка: " + ex.getMessage());
+//                resultArea.setText("Ошибка: " + ex.getMessage());
                 ex.printStackTrace();
             }
         });
@@ -238,6 +258,7 @@ public class MainFrame extends JFrame {
         exportCsvBtn.addActionListener(ev ->
                 exportSignsToCSV(signTable, signTableModel, (Integer) nSpinner.getValue()));
 
+        genTableBtn.doClick();
         return panel;
     }
 
@@ -367,8 +388,22 @@ public class MainFrame extends JFrame {
         JScrollPane resultScroll = new JScrollPane(resultArea);
         resultScroll.setBorder(BorderFactory.createTitledBorder("Результат"));
         resultPanel.add(resultScroll, BorderLayout.CENTER);
+
+        JTextArea statusArea = new JTextArea(2, 40);
+        statusArea.setEditable(false);
+        statusArea.setBackground(new Color(240, 240, 240));
+        JScrollPane statusScroll = new JScrollPane(statusArea);
+        statusScroll.setBorder(BorderFactory.createTitledBorder("Статус"));
+        statusScroll.setPreferredSize(new Dimension(0, 60));
+
+        JPanel southContainer = new JPanel();
+        southContainer.setLayout(new BoxLayout(southContainer, BoxLayout.Y_AXIS));
+        southContainer.add(resultPanel);
+        southContainer.add(statusScroll);
+
+        panel.add(southContainer, BorderLayout.SOUTH);
         
-        panel.add(resultPanel, BorderLayout.SOUTH);
+//        panel.add(resultPanel, BorderLayout.SOUTH);
 
         // обработчик для кнопки генерации таблицы
         genTableBtn.addActionListener(e -> {
@@ -435,6 +470,8 @@ public class MainFrame extends JFrame {
                 ev -> exportSignsToCSV(signTable, signTableModel, (Integer) nSpinner.getValue())
         );
 
+        genTableBtn.doClick();
+
         return panel;
     }
 
@@ -446,6 +483,25 @@ public class MainFrame extends JFrame {
             String padded = String.format("%" + n + "s", binary).replace(' ', '0');
             String basisStr = "|" + padded + ">";
             signTableModel.addRow(new Object[]{basisStr, "+"});
+        }
+    }
+
+    private ImageIcon scaleImage(byte[] imageBytes, int maxWidth, int maxHeight) {
+        try {
+            BufferedImage original = ImageIO.read(new ByteArrayInputStream(imageBytes));
+            int origWidth = original.getWidth();
+            int origHeight = original.getHeight();
+            double scaleX = (double) maxWidth / origWidth;
+            double scaleY = (double) maxHeight / origHeight;
+            double scale = Math.min(scaleX, scaleY);
+            int newWidth = (int) Math.round(origWidth * scale);
+            int newHeight = (int) Math.round(origHeight * scale);
+            Image scaled = original.getScaledInstance(newWidth, newHeight, Image.SCALE_SMOOTH);
+
+            return new ImageIcon(scaled);
+        } catch (IOException e) {
+            e.printStackTrace();
+            return null;
         }
     }
 
@@ -488,9 +544,13 @@ public class MainFrame extends JFrame {
         // панель результатов справа
         JPanel resultPanel = new JPanel(new BorderLayout());
         JTextArea resultArea = new JTextArea(8, 20);
+        resultArea.setPreferredSize(new Dimension(0, 200));
         resultArea.setEditable(false);
         resultPanel.add(new JScrollPane(resultArea), BorderLayout.CENTER);
         JLabel pyramidLabel = new JLabel();
+        int maxWidth = 620;
+        int maxHeight = 500;
+        pyramidLabel.setPreferredSize(new Dimension(maxWidth, maxHeight));
         pyramidLabel.setHorizontalAlignment(SwingConstants.CENTER);
         // полоса прокрутки для изображения если оно большое
         JScrollPane imageScroll = new JScrollPane(pyramidLabel);
@@ -506,22 +566,13 @@ public class MainFrame extends JFrame {
         splitPane.setContinuousLayout(true);
         panel.add(splitPane, BorderLayout.CENTER);
 
-        // генератор таблицы
-        java.util.function.Consumer<Integer> generateTable = n -> {
-            int rows = 1 << n;
-            signTableModel.setRowCount(0);
-            for (int i = 0; i < rows; i++) {
-                String basis = formatBasis(i, n);
-                signTableModel.addRow(new Object[]{basis, "+"});
-            }
+        // обработчик для кнопки генерации таблицы
+        genTableBtn.addActionListener(e -> {
+            int n = (Integer) nSpinner.getValue();
+            tableGeneration(signTableModel, n);
 
             resultArea.setText("");
             pyramidLabel.setIcon(null);
-        };
-
-        genTableBtn.addActionListener(e -> {
-            int n = (Integer) nSpinner.getValue();
-            generateTable.accept(n);
         });
 
 
@@ -561,7 +612,7 @@ public class MainFrame extends JFrame {
                     if (response.containsKey("mismatches")) {
                         List<Integer> mismatches = (List<Integer>) response.get("mismatches");
                         if (!mismatches.isEmpty()) {
-                            sb.append("Несовпадения в базисах:\n");
+                            sb.append("Несовпадения в базисных состояниях:\n");
                             for (int mask : mismatches) {
                                 sb.append("  ").append(formatBasis(mask, n)).append("\n");
                             }
@@ -572,7 +623,9 @@ public class MainFrame extends JFrame {
                 if (response.containsKey("image")) {
                     String base64Image = (String) response.get("image");
                     byte[] imageBytes = Base64.getDecoder().decode(base64Image);
-                    ImageIcon icon = new ImageIcon(imageBytes);
+//                    ImageIcon icon = new ImageIcon(imageBytes);
+//                    масштабирование изображения так чтобы оно не превышало maxWidth, maxHeight
+                    ImageIcon icon = scaleImage(imageBytes, maxWidth, maxHeight);
                     pyramidLabel.setIcon(icon);
                 } else {
                     pyramidLabel.setIcon(null);
@@ -586,7 +639,8 @@ public class MainFrame extends JFrame {
         loadCsvBtn.addActionListener(ev -> loadSignsFromCSV(signTable, signTableModel, nSpinner));
         exportCsvBtn.addActionListener(ev -> exportSignsToCSV(signTable, signTableModel, (Integer) nSpinner.getValue()));
 
-        generateTable.accept(3);
+        genTableBtn.doClick();
+
         return panel;
     }
 }
