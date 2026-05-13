@@ -265,37 +265,56 @@ public class MainFrame extends JFrame {
                 signs.add((String) signTableModel.getValueAt(row, 1));
             }
 
-            String params = "n=" + n + ", signs=" + signs;
-            long start = System.currentTimeMillis();
+            checkBtn.setEnabled(false);
+            resultArea.setText("Проверка...");
+            graphPanel.setGraph(0, null);
 
-            try {
-                GraphStateClient client = new GraphStateClient();
-                Map<String, Object> response = client.checkGraphState(n, signs);
-                long duration = System.currentTimeMillis() - start;
-                int status = (int) response.get("_statusCode");
-                logHttp("POST", "/check_graph_submit", params, status, duration);
+            SwingWorker<Map<String, Object>, Void> worker = new SwingWorker<>() {
+                @Override
+                public Map<String, Object> doInBackground() throws Exception {
+                    long start = System.currentTimeMillis();
+                    GraphStateClient client = new GraphStateClient();
+                    Map<String, Object> response = client.checkGraphState(n, signs);
+                    long duration = System.currentTimeMillis() - start;
+                    response.put("_duration", duration); // + длительность в ответ
 
-                boolean isGraph = (boolean) response.get("is_graph"); // ключ из http ответа
-
-                if (isGraph) {
-                    List<List<Integer>> edges = (List<List<Integer>>) response.get("edges");
-                    resultArea.setText("Состояние является графовым\nНайденный граф: " + edges);
-//                    logInfo("Состояние является графовым. Найденный граф: " + edges.size());
-
-                    // визуализация графа по ребрам из http ответа
-                    graphPanel.setGraph(n, edges);
-                } else {
-                    resultArea.setText("Состояние не является графовым");
-                    graphPanel.setGraph(0, null);
-//                    logInfo("Состояние не графовое");
+                    return response;
                 }
-            } catch (Exception ex) {
-//                logError("Ошибка при проверке: " + ex.getMessage());
-                JOptionPane.showMessageDialog(MainFrame.this,
+
+                @Override
+                protected void done() {
+                    try {
+                        Map<String, Object> response = get();
+                        long duration = (long) response.get("_duration");
+                        int status = (int) response.get("_statusCode");
+                        String params = "n=" + n + ", signs=" + signs;
+                        logHttp("POST", "/check_graph_submit", params, status, duration);
+
+                        boolean isGraph = (boolean) response.get("is_graph");
+                        if (isGraph) {
+                            List<List<Integer>> vertices = (List<List<Integer>>) response.get("vertices");
+                            List<List<Integer>> edges = (List<List<Integer>>) response.get("edges");
+                            resultArea.setText("Состояние является графовым\nG = (V=" + vertices + ", E=" + edges + ")");
+                            graphPanel.setGraph(n, edges);
+//                            logInfo("Состояние графовое, найдено рёбер: " + edges.size());
+                        } else {
+                            resultArea.setText("Состояние не является графовым");
+                            graphPanel.setGraph(0, null);
+                            // logInfo("Состояние не графовое");
+                        }
+                    } catch (Exception ex) {
+//                        resultArea.setText("Ошибка: " + ex.getMessage());
+                        // logError("Ошибка при проверке графовости: " + ex.getMessage());
+                        JOptionPane.showMessageDialog(MainFrame.this,
                         "Ошибка при проверке состояния на графовость: ",
                         "Ошибка", JOptionPane.ERROR_MESSAGE);
-                ex.printStackTrace();
-            }
+                        ex.printStackTrace();
+                    } finally {
+                        checkBtn.setEnabled(true);
+                    }
+                }
+            };
+            worker.execute();
         });
 
         loadCsvBtn.addActionListener(ev ->
