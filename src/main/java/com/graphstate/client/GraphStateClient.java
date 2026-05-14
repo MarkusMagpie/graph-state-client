@@ -77,6 +77,21 @@ public class GraphStateClient {
         return post(url, request);
     }
 
+    public void clearCache() throws IOException {
+        String url = BASE_URL + "/clear_cache";
+        HttpPost post = new HttpPost(url);
+
+        post.setHeader("Authorization", "Bearer your-secret-token");
+        try (CloseableHttpClient client = HttpClients.createDefault();
+             CloseableHttpResponse response = client.execute(post)) {
+
+            int status = response.getStatusLine().getStatusCode();
+            if (status != 200) {
+                throw new IOException("Очистка кэша вернула статус " + status);
+            }
+        }
+    }
+
 
 
     // метод для отправки сериализованного http запроса, получения http ответа и его десериализации
@@ -100,9 +115,12 @@ public class GraphStateClient {
 
             try (CloseableHttpResponse response = client.execute(post_request)) {
                 int statusCode = response.getStatusLine().getStatusCode();
+                String cacheHeader = response.getFirstHeader("X-Cache") != null ?
+                        response.getFirstHeader("X-Cache").getValue() : "MISS";
                 String jsonResponse = EntityUtils.toString(response.getEntity());
                 Map<String, Object> result = mapper.readValue(jsonResponse, Map.class); // JSON -> POJO десериализация ответа
                 result.put("_statusCode", statusCode);
+                result.put("_cache", cacheHeader);
 
                 return result;
             }

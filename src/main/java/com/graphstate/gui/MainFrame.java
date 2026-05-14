@@ -224,9 +224,7 @@ public class MainFrame extends JFrame {
         JButton genTableBtn = new JButton("Сгенерировать таблицу");
         JButton checkBtn = new JButton("Проверить графовость");
         JButton loadCsvBtn = new JButton("Загрузить CSV");
-//        loadCsvBtn.setBackground(Color.lightGray);
         JButton exportCsvBtn = new JButton("Экспортировать CSV");
-//        exportCsvBtn.setBackground(Color.lightGray);
 
         JPanel row1 = new JPanel(new FlowLayout(FlowLayout.LEFT));
         row1.add(new JLabel("количество кубитов (n): "));
@@ -237,6 +235,9 @@ public class MainFrame extends JFrame {
         JPanel row2 = new JPanel(new FlowLayout(FlowLayout.LEFT));
         row2.add(loadCsvBtn);
         row2.add(exportCsvBtn);
+        JButton clearCacheBtn = new JButton("Очистить Redis кэш");
+        clearCacheBtn.setBackground(Color.RED);
+        row2.add(clearCacheBtn);
 
         controlPanel.add(row1);
         controlPanel.add(row2);
@@ -310,6 +311,11 @@ public class MainFrame extends JFrame {
                     long duration = System.currentTimeMillis() - start;
                     response.put("_duration", duration); // + длительность в ответ
 
+                    String cacheStatus = (String) response.get("_cache");
+                    if (cacheStatus != null) {
+                        displayInfo("Кэш: " + cacheStatus);
+                    }
+
                     return response;
                 }
 
@@ -347,6 +353,21 @@ public class MainFrame extends JFrame {
                 }
             };
             worker.execute();
+        });
+
+        clearCacheBtn.addActionListener(ev -> {
+            if (JOptionPane.showConfirmDialog(panel,
+                    "Очистить кэш Redis для проверки графовости?",
+                    "Подтверждение", JOptionPane.YES_NO_OPTION) == JOptionPane.YES_OPTION) {
+                try {
+                    GraphStateClient client = new GraphStateClient();
+                    client.clearCache();
+                    displayInfo("Кэш Redis успешно очищен");
+                } catch (Exception ex) {
+                    displayError("Ошибка очистки кэша: " + ex.getMessage());
+                    ex.printStackTrace();
+                }
+            }
         });
 
         loadCsvBtn.addActionListener(ev ->
