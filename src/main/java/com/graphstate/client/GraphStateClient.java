@@ -71,6 +71,12 @@ public class GraphStateClient {
         return post(url, request);
     }
 
+    public Map<String, Object> lcOrbit(List<Integer> vertices, List<List<Integer>> edges) throws IOException {
+        String url = BASE_URL + "/lc_orbit";
+        Map<String, Object> request = Map.of("vertices", vertices, "edges", edges);
+        return post(url, request);
+    }
+
 
 
     // метод для отправки сериализованного http запроса, получения http ответа и его десериализации

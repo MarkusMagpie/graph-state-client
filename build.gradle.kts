@@ -17,8 +17,11 @@ dependencies {
     // JSON парсер Jackson
     // https://habr.com/ru/companies/otus/articles/687004/
     implementation("com.fasterxml.jackson.core:jackson-databind:2.16.1")
-    // логирование
+
+    // логирование - вывод в гуи
     implementation("org.slf4j:slf4j-simple:2.0.9")
+    // логгирование - для сохранения истории запросов и ошибок в базу данных SQLite
+    implementation("org.xerial:sqlite-jdbc:3.46.0.0")
 }
 
 tasks.test {

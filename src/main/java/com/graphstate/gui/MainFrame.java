@@ -1,6 +1,7 @@
 package com.graphstate.gui;
 
 import com.graphstate.client.GraphStateClient;
+import com.graphstate.util.AppLogger;
 import com.graphstate.util.BasisFormatter;
 
 import javax.imageio.ImageIO;
@@ -9,10 +10,9 @@ import javax.swing.table.DefaultTableModel;
 import java.awt.*;
 import java.awt.image.BufferedImage;
 import java.io.*;
-import java.util.ArrayList;
-import java.util.Base64;
-import java.util.Map;
+import java.util.*;
 import java.util.List;
+import java.util.stream.Collectors;
 
 public class MainFrame extends JFrame {
     private JTextField verticesField;
@@ -37,38 +37,70 @@ public class MainFrame extends JFrame {
         statusScroll.setBorder(BorderFactory.createTitledBorder("HTTP логи: "));
         statusScroll.setPreferredSize(new Dimension(0, 120));
 
+        JButton clearScreenBtn = new JButton("Очистить HTTP логи");
+        clearScreenBtn.addActionListener(e -> {
+            if (JOptionPane.showConfirmDialog(MainFrame.this,
+                    "Очистить отображаемые HTTP логи?",
+                    "Подтверждение", JOptionPane.YES_NO_OPTION) == JOptionPane.YES_OPTION) {
+
+                statusArea.setText("");
+            }
+        });
+
+        JButton clearDbBtn = new JButton("Очистить БД логов");
+        clearDbBtn.addActionListener(e -> {
+            if (JOptionPane.showConfirmDialog(MainFrame.this,
+                    "Удалить все записи из базы данных логов?\nЭто действие необратимо.",
+                    "Подтверждение", JOptionPane.YES_NO_OPTION) == JOptionPane.YES_OPTION) {
+
+                AppLogger.clearDatabase();
+                JOptionPane.showMessageDialog(MainFrame.this, "База данных логов очищена");
+            }
+        });
+
+        JPanel buttonPanel = new JPanel(new FlowLayout(FlowLayout.RIGHT));
+        buttonPanel.add(clearScreenBtn);
+        buttonPanel.add(clearDbBtn);
+
+        JPanel statusPanel = new JPanel(new BorderLayout());
+        statusPanel.add(statusScroll, BorderLayout.CENTER);
+        statusPanel.add(buttonPanel, BorderLayout.EAST);
+
         // главная панель с вкладками
         JTabbedPane tabbedPane = new JTabbedPane();
         tabbedPane.setTabLayoutPolicy(JTabbedPane.SCROLL_TAB_LAYOUT);
         tabbedPane.addTab("Построение состояния по графу", buildGraphPanel());
         tabbedPane.addTab("Проверка состояния на графовость", buildCheckGraphPanel());
+        tabbedPane.addTab("LC-орбита", buildLCOrbitPanel());
         tabbedPane.addTab("Проверка состояния на стабилизаторность", buildCheckStabilizerPanel());
         tabbedPane.addTab("Анализ запутанности", buildEntanglementPanel());
 
-        add(tabbedPane);
-        add(statusScroll, BorderLayout.SOUTH);
+        add(tabbedPane, BorderLayout.CENTER);
+        add(statusPanel, BorderLayout.SOUTH);
     }
 
-    private void logHttp(String method, String url, String params, int statusCode, long durationMs) {
-        String msg = String.format("%s %s HTTP/1.1 | %s -> %d (%d ms)", method, url, params, statusCode, durationMs);
+    private void logHttp(String method, String url, String params, int status, long durationMs) {
         SwingUtilities.invokeLater(() -> {
-            statusArea.append(msg + "\n");
+            statusArea.append(String.format("%s %s HTTP/1.1 | %s -> %d (%d ms)\n", method, url, params, status, durationMs));
             statusArea.setCaretPosition(statusArea.getDocument().getLength());
         });
+        AppLogger.logHttp(method, url, params, status, durationMs);
     }
 
-    private void logError(String message) {
-        SwingUtilities.invokeLater(() -> {
-            statusArea.append("!) " + message + "\n");
-            statusArea.setCaretPosition(statusArea.getDocument().getLength());
-        });
+    private void displayInfo(String message) {
+//        SwingUtilities.invokeLater(() -> {
+//            statusArea.append("ℹ) " + message + "\n");
+//            statusArea.setCaretPosition(statusArea.getDocument().getLength());
+//        });
+        AppLogger.logInfo(message);
     }
 
-    private void logInfo(String message) {
-        SwingUtilities.invokeLater(() -> {
-            statusArea.append("ℹ) " + message + "\n");
-            statusArea.setCaretPosition(statusArea.getDocument().getLength());
-        });
+    private void displayError(String message) {
+//        SwingUtilities.invokeLater(() -> {
+//            statusArea.append("!) " + message + "\n");
+//            statusArea.setCaretPosition(statusArea.getDocument().getLength());
+//        });
+        AppLogger.logError(message);
     }
 
     public JPanel buildGraphPanel() {
@@ -170,7 +202,7 @@ public class MainFrame extends JFrame {
                 tableModel.addRow(new Object[]{basisStr, ampsList.get(i).toString()});
             }
 
-//            logInfo("Построено состояние: 2^" + n + " = " + ampsList.size() + " амплитуд");
+            displayInfo("Построено состояние: 2^" + n + " = " + ampsList.size() + " амплитуд");
         } catch (Exception ex) {
 //            logError("Ошибка: " + ex.getMessage());
             JOptionPane.showMessageDialog(MainFrame.this,
@@ -245,7 +277,7 @@ public class MainFrame extends JFrame {
             graphPanel.setGraph(0, null);
 
 //            statusArea.setText("Таблица для n = " + n + " сгенерирована. Количество базисов: " + (1 << n));
-//            logInfo("Таблица для n = " + n + " сгенерирована. Количество базисов: " + (1 << n));
+            displayInfo("Таблица для n = " + n + " сгенерирована. Количество базисов: " + (1 << n));
         });
 
         checkBtn.addActionListener(e -> {
@@ -296,15 +328,15 @@ public class MainFrame extends JFrame {
                             List<List<Integer>> edges = (List<List<Integer>>) response.get("edges");
                             resultArea.setText("Состояние является графовым\nG = (V=" + vertices + ", E=" + edges + ")");
                             graphPanel.setGraph(n, edges);
-//                            logInfo("Состояние графовое, найдено рёбер: " + edges.size());
+                            displayInfo("Состояние графовое, найдено рёбер: " + edges.size());
                         } else {
                             resultArea.setText("Состояние не является графовым");
                             graphPanel.setGraph(0, null);
-                            // logInfo("Состояние не графовое");
+                             displayInfo("Состояние не графовое");
                         }
                     } catch (Exception ex) {
 //                        resultArea.setText("Ошибка: " + ex.getMessage());
-                        // logError("Ошибка при проверке графовости: " + ex.getMessage());
+                         displayError("Ошибка при проверке графовости: " + ex.getMessage());
                         JOptionPane.showMessageDialog(MainFrame.this,
                         "Ошибка при проверке состояния на графовость: ",
                         "Ошибка", JOptionPane.ERROR_MESSAGE);
@@ -400,6 +432,134 @@ public class MainFrame extends JFrame {
         }
     }
 
+    // --------------------------------------------------------------- "LC-орбита"
+    private JPanel buildLCOrbitPanel() {
+        JPanel panel = new JPanel(new BorderLayout(10, 10));
+        panel.setBorder(BorderFactory.createEmptyBorder(10, 10, 10, 10));
+
+        // панель ввода графа
+        JPanel inputPanel = new JPanel(new GridBagLayout());
+        GridBagConstraints gbc = new GridBagConstraints();
+        gbc.insets = new Insets(5, 5, 5, 5);
+        gbc.fill = GridBagConstraints.HORIZONTAL;
+
+        gbc.gridx = 0; gbc.gridy = 0;
+        inputPanel.add(new JLabel("Вершины: "), gbc);
+        gbc.gridx = 1; gbc.gridwidth = 2;
+        JTextField verticesField = new JTextField("1,2,3,4");
+        inputPanel.add(verticesField, gbc);
+
+        gbc.gridx = 0; gbc.gridy = 1; gbc.gridwidth = 1;
+        inputPanel.add(new JLabel("Ребра: "), gbc);
+        gbc.gridx = 1; gbc.gridwidth = 2;
+        JTextField edgesField = new JTextField("1-2 2-3 3-4");
+        inputPanel.add(edgesField, gbc);
+
+        gbc.gridx = 2; gbc.gridy = 2; gbc.gridwidth = 1;
+        JButton computeBtn = new JButton("Вычислить LC-орбиту");
+        inputPanel.add(computeBtn, gbc);
+
+        panel.add(inputPanel, BorderLayout.NORTH);
+
+        // область вывода результата = список состояний
+        JTextArea resultArea = new JTextArea(15, 80);
+        resultArea.setEditable(false);
+        resultArea.setFont(new Font("Monospaced", Font.PLAIN, 12));
+        JScrollPane scrollPane = new JScrollPane(resultArea);
+        scrollPane.setBorder(BorderFactory.createTitledBorder("LC-орбита"));
+        panel.add(scrollPane, BorderLayout.CENTER);
+
+        computeBtn.addActionListener(e -> {
+            String verticesStr = verticesField.getText().trim();
+            String edgesStr = edgesField.getText().trim();
+            if (verticesStr.isEmpty() || edgesStr.isEmpty()) {
+                JOptionPane.showMessageDialog(panel, "Поля не должны быть пустыми",
+                        "Ошибка", JOptionPane.ERROR_MESSAGE);
+                return;
+            }
+
+            List<Integer> vertices = Arrays.stream(verticesStr.split(","))
+                    .map(String::trim).map(Integer::parseInt).collect(Collectors.toList());
+            List<List<Integer>> edges = Arrays.stream(edgesStr.split(" "))
+                    .map(pair -> pair.split("-"))
+                    .map(parts -> List.of(Integer.parseInt(parts[0]), Integer.parseInt(parts[1])))
+                    .collect(Collectors.toList());
+
+            computeBtn.setEnabled(false);
+            resultArea.setText("Вычисление LC-орбиты...");
+
+            SwingWorker<Map<String, Object>, Void> worker = new SwingWorker<>() {
+                private long duration;
+                private int statusCode;
+
+                @Override
+                protected Map<String, Object> doInBackground() throws Exception {
+//                    return new GraphStateClient().lcOrbit(vertices, edges);
+                    long start = System.currentTimeMillis();
+                    Map<String, Object> response = new GraphStateClient().lcOrbit(vertices, edges);
+                    duration = System.currentTimeMillis() - start;
+                    statusCode = (int) response.getOrDefault("_statusCode", 500);
+                    response.put("_duration", duration);
+                    response.put("_statusCode", statusCode);
+                    return response;
+                }
+
+                @Override
+                protected void done() {
+                    try {
+                        Map<String, Object> response = get();
+
+                        long duration = (long) response.get("_duration");
+                        int status = (int) response.get("_statusCode");
+                        String params = "vertices=" + verticesStr + ", edges=" + edgesStr;
+                        logHttp("POST", "/lc_orbit", params, status, duration);
+
+                        int size = (int) response.get("orbit_size");
+                        List<Map<String, Object>> states = (List<Map<String, Object>>) response.get("orbit_states");
+
+                        StringBuilder sb = new StringBuilder();
+                        sb.append("Размер орбиты: ").append(size).append("\n\n");
+                        for (int i = 0; i < states.size(); i++) {
+                            Map<String, Object> state = states.get(i);
+                            int n = (int) state.get("n");
+                            List<String> signs = (List<String>) state.get("signs");
+                            sb.append("  состояние ").append(i+1).append(":\n");
+                            sb.append("  ").append(formatStateString(signs, n)).append("\n\n");
+                        }
+                        resultArea.setText(sb.toString());
+                        displayInfo("LC-орбита вычислена, размер: " + size);
+                    } catch (Exception ex) {
+                        resultArea.setText("Ошибка при вычислении LC-орбиты: " + ex.getMessage());
+                        displayError("Ошибка при вычислении LC-орбиты: " + ex.getMessage());
+                        ex.printStackTrace();
+                    } finally {
+                        computeBtn.setEnabled(true);
+                    }
+                }
+            };
+            worker.execute();
+        });
+
+        return panel;
+    }
+
+    private String formatStateString(List<String> signs, int n) {
+        int numStates = 1 << n;
+        StringBuilder sb = new StringBuilder();
+        sb.append("|\u03C8> = (1/\u221A").append(numStates).append(")(");
+
+        for (int i = 0; i < numStates; i++) {
+            String sign = signs.get(i);
+            if (sign.equals("+") && i > 0) sb.append(" + ");
+            else if (sign.equals("-")) sb.append(" - ");
+            String basis = BasisFormatter.format(i, n);
+            sb.append(basis);
+        }
+        sb.append(")");
+
+        return sb.toString();
+    }
+
     // --------------------------------------------------------------- "Проверка состояния на стабилизаторность"
     public JPanel buildCheckStabilizerPanel() {
         JPanel panel = new JPanel(new BorderLayout(10, 10));
@@ -451,6 +611,8 @@ public class MainFrame extends JFrame {
             int n = (Integer) nSpinner.getValue();
             tableGeneration(signTableModel, n);
             resultArea.setText("");
+
+            displayInfo("Таблица для n = " + n + " сгенерирована. Количество базисов: " + (1 << n));
         });
 
         // обработчик для кнопки проверки стабилллизаторности
@@ -461,7 +623,7 @@ public class MainFrame extends JFrame {
                 JOptionPane.showMessageDialog(panel,
                         "Пожалуйста, сначала сгенерируйте таблицу для выбранного n",
                         "Ошибка", JOptionPane.ERROR_MESSAGE);
-//                logError("Пожалуйста, сначала сгенерируйте таблицу для выбранного n");
+                displayError("Пожалуйста, сначала сгенерируйте таблицу для выбранного n");
                 return;
             }
 
@@ -502,16 +664,16 @@ public class MainFrame extends JFrame {
                     for (Object op : opsList) {
                         sb.append(op.toString()).append("\n");
                     }
-//                    logInfo("Состояние стабилизаторное, ранг " + response.get("rank"));
+                    displayInfo("Состояние стабилизаторное, ранг " + response.get("rank"));
                 } else {
                     sb.append("СОСТОЯНИЕ НЕ ЯВЛЯЕТСЯ СТАБИЛИЗАТОРНЫМ\n");
                     sb.append("Причина: ").append(response.get("reason")).append("\n");
-                    // logInfo("Состояние не стабилизаторное: " + response.get("reason"));
+                    displayInfo("Состояние не стабилизаторное: " + response.get("reason"));
                 }
 
                 resultArea.setText(sb.toString());
             } catch (Exception ex) {
-//                logError("Ошибка при проверке: " + ex.getMessage());
+                displayError("Ошибка при проверке: " + ex.getMessage());
                 resultArea.setText("Ошибка: " + ex.getMessage());
                 ex.printStackTrace();
             }
@@ -676,7 +838,7 @@ public class MainFrame extends JFrame {
                     } else {
                         sb.append("Не удалось получить разложение на однокубитные состояния\n");
                     }
-                    // logInfo("Состояние полностью сепарабельно");
+                     displayInfo("Состояние полностью сепарабельно");
                 } else {
                     sb.append("Состояние запутано\n");
                     if (response.containsKey("mismatches")) {
@@ -688,7 +850,7 @@ public class MainFrame extends JFrame {
                             }
                         }
                     }
-//                    logInfo("Состояние запутано");
+                    displayInfo("Состояние запутано");
                 }
                 resultArea.setText(sb.toString());
 
